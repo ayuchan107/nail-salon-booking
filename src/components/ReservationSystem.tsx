@@ -125,7 +125,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   })
 
   // 担当者フィルター用の状態
-  const [selectedStaffFilter, setSelectedStaffFilter] = useState<string>('all')
+  const [selectedStaffFilter, setSelectedStaffFilter] = useState<string>('')
 
   // 初期データ読み込み
   useEffect(() => {
@@ -151,6 +151,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
 
     setStaffList(initialStaff)
     setMenuItems(initialMenus)
+    
+    // 初期フィルターを最初の担当者に設定
+    if (initialStaff.length > 0) {
+      setSelectedStaffFilter(initialStaff[0].id)
+    }
+    
     generateSchedules()
 
     // LocalStorageからデータを読み込み
@@ -395,57 +401,6 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       console.log('=== End blocking debug ===')
       return updatedSchedules
     })
-  }
-
-  // テスト用予約作成関数
-  const createTestReservation = () => {
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    const dateString = tomorrow.toISOString().split('T')[0]
-    
-    const testReservation: ReservationRecord = {
-      id: `test-${Date.now()}`,
-      date: dateString,
-      time: '14:00',
-      customerInfo: {
-        name: 'テスト太郎',
-        phone: '090-1234-5678',
-        menu: menuItems[0], // シンプルネイル (60分)
-        staff: staffList[0]  // 田中さん
-      },
-      completed: false
-    }
-
-    // 予約履歴に追加
-    setReservationHistory(prev => [...prev, testReservation])
-    localStorage.setItem('reservations', JSON.stringify([...reservationHistory, testReservation]))
-
-    // スケジュールを更新（予約スロット + 後続スロットも同時にブロック）
-    setSchedules(prev => prev.map(schedule => 
-      schedule.date === dateString
-        ? {
-            ...schedule,
-            slots: schedule.slots.map(slot => {
-              // 14:00の予約スロットを埋める
-              if (slot.time === '14:00') {
-                console.log('📝 Booking test slot: 14:00')
-                return { ...slot, isAvailable: false, customerInfo: testReservation.customerInfo }
-              }
-              
-              // 15:00をブロック（60分コースなので）
-              if (slot.time === '15:00' && slot.isAvailable && !slot.customerInfo) {
-                console.log('🔒 Blocking following test slot: 15:00')
-                return { ...slot, isAvailable: false, customerInfo: undefined }
-              }
-              
-              return slot
-            })
-          }
-        : schedule
-    ))
-    
-    alert('テスト予約を作成しました！\n明日14:00〜 テスト太郎様 シンプルネイル(60分)\n→ 15:00の枠も自動でブロックされます')
   }
 
   // 予約データリセット関数
@@ -1353,13 +1308,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               <h3 className="text-xl font-semibold text-gray-800">📊 予約管理</h3>
               {/* 担当者フィルター */}
               <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700">担当者で絞り込み:</label>
+                <label className="text-sm font-medium text-gray-700">担当者:</label>
                 <select
                   value={selectedStaffFilter}
                   onChange={(e) => setSelectedStaffFilter(e.target.value)}
                   className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
                 >
-                  <option value="all">全員</option>
                   {staffList.map(staff => (
                     <option key={staff.id} value={staff.id}>{staff.name}</option>
                   ))}
@@ -1373,7 +1327,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               {reservationHistory.filter(reservation => {
                 const today = new Date().toISOString().split('T')[0]
                 const matchesDate = reservation.date === today
-                const matchesStaff = selectedStaffFilter === 'all' || reservation.customerInfo.staff.id === selectedStaffFilter
+                const matchesStaff = reservation.customerInfo.staff.id === selectedStaffFilter
                 return matchesDate && matchesStaff
               }).length > 0 ? (
                 <div className="space-y-2">
@@ -1381,7 +1335,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     .filter(reservation => {
                       const today = new Date().toISOString().split('T')[0]
                       const matchesDate = reservation.date === today
-                      const matchesStaff = selectedStaffFilter === 'all' || reservation.customerInfo.staff.id === selectedStaffFilter
+                      const matchesStaff = reservation.customerInfo.staff.id === selectedStaffFilter
                       return matchesDate && matchesStaff
                     })
                     .map(reservation => (
@@ -1413,9 +1367,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                 </div>
               ) : (
                 <p className="text-gray-500">
-                  {selectedStaffFilter === 'all' 
-                    ? '本日の予約はありません' 
-                    : `${staffList.find(s => s.id === selectedStaffFilter)?.name}の本日の予約はありません`}
+                  {staffList.find(s => s.id === selectedStaffFilter)?.name}の本日の予約はありません
                 </p>
               )}
             </div>
@@ -1424,12 +1376,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             <div className="mb-6">
               <h4 className="text-lg font-medium text-gray-700 mb-3">全予約履歴</h4>
               {reservationHistory.filter(reservation => 
-                selectedStaffFilter === 'all' || reservation.customerInfo.staff.id === selectedStaffFilter
+                reservation.customerInfo.staff.id === selectedStaffFilter
               ).length > 0 ? (
                 <div className="max-h-64 overflow-y-auto space-y-2">
                   {reservationHistory
                     .filter(reservation => 
-                      selectedStaffFilter === 'all' || reservation.customerInfo.staff.id === selectedStaffFilter
+                      reservation.customerInfo.staff.id === selectedStaffFilter
                     )
                     .map(reservation => (
                       <div key={reservation.id} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
@@ -1460,9 +1412,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                 </div>
               ) : (
                 <p className="text-gray-500">
-                  {selectedStaffFilter === 'all' 
-                    ? '予約履歴がありません' 
-                    : `${staffList.find(s => s.id === selectedStaffFilter)?.name}の予約履歴がありません`}
+                  {staffList.find(s => s.id === selectedStaffFilter)?.name}の予約履歴がありません
                 </p>
               )}
             </div>
@@ -1475,12 +1425,6 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                   ⭕をクリック: 空き枠を予約不可に / ❌をクリック: 予約不可を空き枠に
                 </p>
                 <div className="flex gap-2">
-                  <button
-                    onClick={createTestReservation}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-                  >
-                    🧪 テスト予約作成
-                  </button>
                   <button
                     onClick={forceRegenerateSchedules}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
@@ -1528,10 +1472,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     </h5>
                     <div className="space-y-2">
                       {schedule.slots.map(slot => {
-                        // 選択されたスタッフフィルターに基づいて表示制御
+                        // 選択されたスタッフに基づいて表示制御
                         // 予約済みの場合は該当スタッフのもののみ、空き/不可枠は常に表示
-                        const shouldShow = selectedStaffFilter === 'all' || 
-                          (slot.customerInfo && slot.customerInfo.staff.id === selectedStaffFilter) ||
+                        const shouldShow = (slot.customerInfo && slot.customerInfo.staff.id === selectedStaffFilter) ||
                           !slot.customerInfo; // 予約が入っていないスロット（空き・不可）は常に表示
                         
                         if (!shouldShow) return null;
@@ -1592,13 +1535,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               <div className="flex items-center space-x-4">
                 {/* 担当者フィルター */}
                 <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-700">担当者で絞り込み:</label>
+                  <label className="text-sm font-medium text-gray-700">担当者:</label>
                   <select
                     value={selectedStaffFilter}
                     onChange={(e) => setSelectedStaffFilter(e.target.value)}
                     className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
                   >
-                    <option value="all">全員</option>
                     {staffList.map(staff => (
                       <option key={staff.id} value={staff.id}>{staff.name}</option>
                     ))}
@@ -1619,24 +1561,62 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             {/* メニュー一覧 */}
             <div className="grid md:grid-cols-2 gap-4 mb-6">
               {menuItems
-                .filter(menu => selectedStaffFilter === 'all' || menu.staffId === selectedStaffFilter)
+                .filter(menu => menu.staffId === selectedStaffFilter)
                 .map(menu => (
                   <div key={menu.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-semibold text-gray-800">{menu.name}</h4>
-                      <button
-                        onClick={() => {
-                          setEditingMenu(menu)
-                          setMenuForm({
-                            name: menu.name,
-                            duration: menu.duration.toString(),
-                            price: menu.price.toString()
-                          })
-                        }}
-                        className="text-blue-600 hover:text-blue-800 text-sm"
-                      >
-                        編集
-                      </button>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => {
+                            setEditingMenu(menu)
+                            setMenuForm({
+                              name: menu.name,
+                              duration: menu.duration.toString(),
+                              price: menu.price.toString()
+                            })
+                          }}
+                          className="text-blue-600 hover:text-blue-800 text-sm"
+                        >
+                          編集
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`メニュー「${menu.name}」を削除しますか？\n\n⚠️ 注意: このメニューを使用した予約履歴は残りますが、新規予約では選択できなくなります。`)) {
+                              // 関連する予約があるかチェック
+                              const relatedReservations = reservationHistory.filter(r => r.customerInfo.menu.id === menu.id)
+                              
+                              if (relatedReservations.length > 0) {
+                                if (!window.confirm(`⚠️ このメニューには${relatedReservations.length}件の予約があります。\n\n削除すると予約履歴の表示に影響する可能性がありますが、削除を続行しますか？`)) {
+                                  return
+                                }
+                              }
+                              
+                              // メニューを削除
+                              const updatedMenus = menuItems.filter(m => m.id !== menu.id)
+                              setMenuItems(updatedMenus)
+                              
+                              // 担当者の対応メニューからも削除
+                              const updatedStaff = staffList.map(staff => ({
+                                ...staff,
+                                menuIds: staff.menuIds.filter(id => id !== menu.id)
+                              }))
+                              setStaffList(updatedStaff)
+                              
+                              // 編集中の場合はクリア
+                              if (editingMenu?.id === menu.id) {
+                                setEditingMenu(null)
+                                setMenuForm({ name: '', duration: '', price: '' })
+                              }
+                              
+                              alert(`✅ メニュー「${menu.name}」を削除しました。`)
+                            }
+                          }}
+                          className="text-red-600 hover:text-red-800 text-sm"
+                        >
+                          削除
+                        </button>
+                      </div>
                     </div>
                     <div className="text-sm text-gray-600">
                       <p>所要時間: {menu.duration}分</p>
@@ -1645,12 +1625,10 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     </div>
                   </div>
                 ))}
-              {menuItems.filter(menu => selectedStaffFilter === 'all' || menu.staffId === selectedStaffFilter).length === 0 && (
+              {menuItems.filter(menu => menu.staffId === selectedStaffFilter).length === 0 && (
                 <div className="col-span-2 text-center py-8">
                   <p className="text-gray-500">
-                    {selectedStaffFilter === 'all' 
-                      ? 'メニューがありません' 
-                      : `${staffList.find(s => s.id === selectedStaffFilter)?.name}のメニューがありません`}
+                    {staffList.find(s => s.id === selectedStaffFilter)?.name}のメニューがありません
                   </p>
                 </div>
               )}
@@ -1748,18 +1726,63 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                 <div key={staff.id} className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-semibold text-gray-800">{staff.name}</h4>
-                    <button
-                      onClick={() => {
-                        setEditingStaff(staff)
-                        setStaffForm({
-                          name: staff.name,
-                          selectedMenus: staff.menuIds
-                        })
-                      }}
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      編集
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => {
+                          setEditingStaff(staff)
+                          setStaffForm({
+                            name: staff.name,
+                            selectedMenus: staff.menuIds
+                          })
+                        }}
+                        className="text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        編集
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`担当者「${staff.name}」を削除しますか？\n\n⚠️ 注意: この担当者による予約履歴は残りますが、新規予約では選択できなくなります。`)) {
+                            // 関連する予約があるかチェック
+                            const relatedReservations = reservationHistory.filter(r => r.customerInfo.staff.id === staff.id)
+                            const relatedTimeRequests = timeRequests.filter(r => r.staff.id === staff.id)
+                            
+                            if (relatedReservations.length > 0 || relatedTimeRequests.length > 0) {
+                              let message = `⚠️ この担当者には以下の関連データがあります:\n`
+                              if (relatedReservations.length > 0) {
+                                message += `• 予約履歴: ${relatedReservations.length}件\n`
+                              }
+                              if (relatedTimeRequests.length > 0) {
+                                message += `• 時間要望: ${relatedTimeRequests.length}件\n`
+                              }
+                              message += `\n削除すると履歴の表示に影響する可能性がありますが、削除を続行しますか？`
+                              
+                              if (!window.confirm(message)) {
+                                return
+                              }
+                            }
+                            
+                            // 担当者を削除
+                            const updatedStaff = staffList.filter(s => s.id !== staff.id)
+                            setStaffList(updatedStaff)
+                            
+                            // この担当者のメニューを削除
+                            const updatedMenus = menuItems.filter(m => m.staffId !== staff.id)
+                            setMenuItems(updatedMenus)
+                            
+                            // 編集中の場合はクリア
+                            if (editingStaff?.id === staff.id) {
+                              setEditingStaff(null)
+                              setStaffForm({ name: '', selectedMenus: [] })
+                            }
+                            
+                            alert(`✅ 担当者「${staff.name}」とその担当メニューを削除しました。`)
+                          }
+                        }}
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        削除
+                      </button>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-600">
                     <p>対応メニュー: {staff.menuIds.length}件</p>
@@ -1861,13 +1884,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               <h3 className="text-xl font-semibold text-gray-800">🕐 時間要望管理</h3>
               {/* 担当者フィルター */}
               <div className="flex items-center space-x-2">
-                <label className="text-sm font-medium text-gray-700">担当者で絞り込み:</label>
+                <label className="text-sm font-medium text-gray-700">担当者:</label>
                 <select
                   value={selectedStaffFilter}
                   onChange={(e) => setSelectedStaffFilter(e.target.value)}
                   className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
                 >
-                  <option value="all">全員</option>
                   {staffList.map(staff => (
                     <option key={staff.id} value={staff.id}>{staff.name}</option>
                   ))}
@@ -1904,12 +1926,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             </div>
             
             {timeRequests.filter(request => 
-              selectedStaffFilter === 'all' || request.staff.id === selectedStaffFilter
+              request.staff.id === selectedStaffFilter
             ).length > 0 ? (
               <div className="space-y-4">
                 {timeRequests
                   .filter(request => 
-                    selectedStaffFilter === 'all' || request.staff.id === selectedStaffFilter
+                    request.staff.id === selectedStaffFilter
                   )
                   .map(request => (
                     <div key={request.id} className="border border-gray-200 rounded-lg p-4">
@@ -1954,9 +1976,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               </div>
             ) : (
               <p className="text-gray-500">
-                {selectedStaffFilter === 'all' 
-                  ? '時間要望はありません' 
-                  : `${staffList.find(s => s.id === selectedStaffFilter)?.name}への時間要望はありません`}
+                {staffList.find(s => s.id === selectedStaffFilter)?.name}への時間要望はありません
               </p>
             )}
           </div>
