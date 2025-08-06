@@ -92,6 +92,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [showMenuManagement, setShowMenuManagement] = useState(false)
   const [editingMenu, setEditingMenu] = useState<MenuItem | null>(null)
+  const [showMenuForm, setShowMenuForm] = useState(false)
   const [menuForm, setMenuForm] = useState({
     name: '',
     duration: '',
@@ -101,9 +102,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   // 担当者管理用の状態
   const [showStaffManagement, setShowStaffManagement] = useState(false)
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null)
+  const [showStaffForm, setShowStaffForm] = useState(false)
   const [staffForm, setStaffForm] = useState({
-    name: '',
-    selectedMenus: [] as string[]
+    name: ''
   })
   
   // 時間要望関連の状態
@@ -133,15 +134,17 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   }, [])
 
   const loadInitialData = () => {
-    // サンプル担当者データ
-    const initialStaff: Staff[] = [
+    // LocalStorageから担当者データを読み込み、なければサンプルデータを使用
+    const savedStaff = localStorage.getItem('staffList')
+    const initialStaff: Staff[] = savedStaff ? JSON.parse(savedStaff) : [
       { id: '1', name: '田中さん', menuIds: ['1', '2', '3'] },
       { id: '2', name: '佐藤さん', menuIds: ['2', '3', '4'] },
       { id: '3', name: '山田さん', menuIds: ['1', '3', '4'] }
     ]
 
-    // サンプルメニューデータ
-    const initialMenus: MenuItem[] = [
+    // LocalStorageからメニューデータを読み込み、なければサンプルデータを使用
+    const savedMenus = localStorage.getItem('menuItems')
+    const initialMenus: MenuItem[] = savedMenus ? JSON.parse(savedMenus) : [
       { id: '1', name: 'シンプルネイル', duration: 60, price: 5000, staffId: '1' },
       { id: '2', name: 'デザインネイル', duration: 90, price: 7000, staffId: '1' },
       { id: '3', name: 'ジェルネイル', duration: 120, price: 8000, staffId: '2' },
@@ -151,6 +154,14 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
 
     setStaffList(initialStaff)
     setMenuItems(initialMenus)
+    
+    // 初回ロードの場合はLocalStorageに保存
+    if (!savedStaff) {
+      localStorage.setItem('staffList', JSON.stringify(initialStaff))
+    }
+    if (!savedMenus) {
+      localStorage.setItem('menuItems', JSON.stringify(initialMenus))
+    }
     
     // 初期フィルターを最初の担当者に設定
     if (initialStaff.length > 0) {
@@ -1550,6 +1561,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                   onClick={() => {
                     setEditingMenu(null)
                     setMenuForm({ name: '', duration: '', price: '' })
+                    setShowMenuForm(true)
                   }}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
                 >
@@ -1575,6 +1587,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                               duration: menu.duration.toString(),
                               price: menu.price.toString()
                             })
+                            setShowMenuForm(true)
                           }}
                           className="text-blue-600 hover:text-blue-800 text-sm"
                         >
@@ -1592,21 +1605,22 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                                 }
                               }
                               
-                              // メニューを削除
-                              const updatedMenus = menuItems.filter(m => m.id !== menu.id)
-                              setMenuItems(updatedMenus)
-                              
-                              // 担当者の対応メニューからも削除
-                              const updatedStaff = staffList.map(staff => ({
-                                ...staff,
-                                menuIds: staff.menuIds.filter(id => id !== menu.id)
-                              }))
-                              setStaffList(updatedStaff)
-                              
-                              // 編集中の場合はクリア
+                            // メニューを削除
+                            const updatedMenus = menuItems.filter(m => m.id !== menu.id)
+                            setMenuItems(updatedMenus)
+                            localStorage.setItem('menuItems', JSON.stringify(updatedMenus))
+                            
+                            // 担当者の対応メニューからも削除
+                            const updatedStaff = staffList.map(staff => ({
+                              ...staff,
+                              menuIds: staff.menuIds.filter(id => id !== menu.id)
+                            }))
+                            setStaffList(updatedStaff)
+                            localStorage.setItem('staffList', JSON.stringify(updatedStaff))                              // 編集中の場合はクリア
                               if (editingMenu?.id === menu.id) {
                                 setEditingMenu(null)
                                 setMenuForm({ name: '', duration: '', price: '' })
+                                setShowMenuForm(false)
                               }
                               
                               alert(`✅ メニュー「${menu.name}」を削除しました。`)
@@ -1635,7 +1649,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             </div>
 
             {/* メニュー編集フォーム */}
-            {(editingMenu !== null || menuForm.name) && (
+            {showMenuForm && (
               <div className="border-t pt-4">
                 <h4 className="font-medium text-gray-800 mb-3">
                   {editingMenu ? 'メニュー編集' : '新規メニュー追加'}
@@ -1682,6 +1696,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                       onClick={() => {
                         setEditingMenu(null)
                         setMenuForm({ name: '', duration: '', price: '' })
+                        setShowMenuForm(false)
                       }}
                       className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
@@ -1689,9 +1704,64 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     </button>
                     <button
                       onClick={() => {
-                        // メニュー保存ロジック（簡略化）
+                        // バリデーション
+                        if (!menuForm.name || !menuForm.duration || !menuForm.price) {
+                          alert('全ての項目を入力してください')
+                          return
+                        }
+
+                        const duration = parseInt(menuForm.duration)
+                        const price = parseInt(menuForm.price)
+
+                        if (isNaN(duration) || duration <= 0) {
+                          alert('所要時間は正の数値を入力してください')
+                          return
+                        }
+
+                        if (isNaN(price) || price <= 0) {
+                          alert('料金は正の数値を入力してください')
+                          return
+                        }
+
+                        if (editingMenu) {
+                          // 編集の場合
+                          const updatedMenus = menuItems.map(m => 
+                            m.id === editingMenu.id 
+                              ? { ...m, name: menuForm.name, duration, price }
+                              : m
+                          )
+                          setMenuItems(updatedMenus)
+                          localStorage.setItem('menuItems', JSON.stringify(updatedMenus))
+                          alert(`✅ メニュー「${menuForm.name}」を更新しました`)
+                        } else {
+                          // 新規追加の場合
+                          const newMenu: MenuItem = {
+                            id: Date.now().toString(),
+                            name: menuForm.name,
+                            duration,
+                            price,
+                            staffId: selectedStaffFilter
+                          }
+                          const updatedMenus = [...menuItems, newMenu]
+                          setMenuItems(updatedMenus)
+                          localStorage.setItem('menuItems', JSON.stringify(updatedMenus))
+                          
+                          // 担当者の対応メニューにも追加
+                          const updatedStaff = staffList.map(staff => 
+                            staff.id === selectedStaffFilter 
+                              ? { ...staff, menuIds: [...staff.menuIds, newMenu.id] }
+                              : staff
+                          )
+                          setStaffList(updatedStaff)
+                          localStorage.setItem('staffList', JSON.stringify(updatedStaff))
+                          
+                          alert(`✅ 新規メニュー「${menuForm.name}」を追加しました`)
+                        }
+
+                        // フォームをリセット
                         setEditingMenu(null)
                         setMenuForm({ name: '', duration: '', price: '' })
+                        setShowMenuForm(false)
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
                     >
@@ -1712,7 +1782,8 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               <button
                 onClick={() => {
                   setEditingStaff(null)
-                  setStaffForm({ name: '', selectedMenus: [] })
+                  setStaffForm({ name: '' })
+                  setShowStaffForm(true)
                 }}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
               >
@@ -1731,9 +1802,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                         onClick={() => {
                           setEditingStaff(staff)
                           setStaffForm({
-                            name: staff.name,
-                            selectedMenus: staff.menuIds
+                            name: staff.name
                           })
+                          setShowStaffForm(true)
                         }}
                         className="text-blue-600 hover:text-blue-800 text-sm"
                       >
@@ -1764,15 +1835,18 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                             // 担当者を削除
                             const updatedStaff = staffList.filter(s => s.id !== staff.id)
                             setStaffList(updatedStaff)
+                            localStorage.setItem('staffList', JSON.stringify(updatedStaff))
                             
                             // この担当者のメニューを削除
                             const updatedMenus = menuItems.filter(m => m.staffId !== staff.id)
                             setMenuItems(updatedMenus)
+                            localStorage.setItem('menuItems', JSON.stringify(updatedMenus))
                             
                             // 編集中の場合はクリア
                             if (editingStaff?.id === staff.id) {
                               setEditingStaff(null)
-                              setStaffForm({ name: '', selectedMenus: [] })
+                              setStaffForm({ name: '' })
+                              setShowStaffForm(false)
                             }
                             
                             alert(`✅ 担当者「${staff.name}」とその担当メニューを削除しました。`)
@@ -1784,25 +1858,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                       </button>
                     </div>
                   </div>
-                  <div className="text-sm text-gray-600">
-                    <p>対応メニュー: {staff.menuIds.length}件</p>
-                    <div className="mt-1">
-                      {staff.menuIds.map(menuId => {
-                        const menu = menuItems.find(m => m.id === menuId)
-                        return menu ? (
-                          <span key={menuId} className="inline-block bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs mr-1 mb-1">
-                            {menu.name}
-                          </span>
-                        ) : null
-                      })}
-                    </div>
-                  </div>
                 </div>
               ))}
             </div>
 
             {/* スタッフ編集フォーム */}
-            {(editingStaff !== null || staffForm.name) && (
+            {showStaffForm && (
               <div className="border-t pt-4">
                 <h4 className="font-medium text-gray-800 mb-3">
                   {editingStaff ? 'スタッフ編集' : '新規スタッフ追加'}
@@ -1820,41 +1881,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                       placeholder="スタッフ名を入力"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      対応可能メニュー
-                    </label>
-                    <div className="grid md:grid-cols-3 gap-2">
-                      {menuItems.map(menu => (
-                        <label key={menu.id} className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={staffForm.selectedMenus.includes(menu.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setStaffForm(prev => ({
-                                  ...prev,
-                                  selectedMenus: [...prev.selectedMenus, menu.id]
-                                }))
-                              } else {
-                                setStaffForm(prev => ({
-                                  ...prev,
-                                  selectedMenus: prev.selectedMenus.filter(id => id !== menu.id)
-                                }))
-                              }
-                            }}
-                            className="rounded"
-                          />
-                          <span className="text-sm">{menu.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => {
                         setEditingStaff(null)
-                        setStaffForm({ name: '', selectedMenus: [] })
+                        setStaffForm({ name: '' })
+                        setShowStaffForm(false)
                       }}
                       className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
@@ -1862,9 +1894,41 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     </button>
                     <button
                       onClick={() => {
-                        // スタッフ保存ロジック（簡略化）
+                        // バリデーション
+                        if (!staffForm.name.trim()) {
+                          alert('スタッフ名を入力してください')
+                          return
+                        }
+
+                        if (editingStaff) {
+                          // 編集の場合
+                          const updatedStaff = staffList.map(s => 
+                            s.id === editingStaff.id 
+                              ? { ...s, name: staffForm.name.trim() }
+                              : s
+                          )
+                          setStaffList(updatedStaff)
+                          localStorage.setItem('staffList', JSON.stringify(updatedStaff))
+                          
+                          alert(`✅ スタッフ「${staffForm.name}」の情報を更新しました`)
+                        } else {
+                          // 新規追加の場合
+                          const newStaff: Staff = {
+                            id: Date.now().toString(),
+                            name: staffForm.name.trim(),
+                            menuIds: []
+                          }
+                          const updatedStaff = [...staffList, newStaff]
+                          setStaffList(updatedStaff)
+                          localStorage.setItem('staffList', JSON.stringify(updatedStaff))
+                          
+                          alert(`✅ 新規スタッフ「${staffForm.name}」を追加しました`)
+                        }
+
+                        // フォームをリセット
                         setEditingStaff(null)
-                        setStaffForm({ name: '', selectedMenus: [] })
+                        setStaffForm({ name: '' })
+                        setShowStaffForm(false)
                       }}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
                     >
