@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import emailjs from '@emailjs/browser'
 
 // 型定義
 interface Staff {
   id: string
   name: string
+  email: string
   menuIds: string[]
 }
 
@@ -104,7 +106,8 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   const [editingStaff, setEditingStaff] = useState<Staff | null>(null)
   const [showStaffForm, setShowStaffForm] = useState(false)
   const [staffForm, setStaffForm] = useState({
-    name: ''
+    name: '',
+    email: ''
   })
   
   // 時間要望関連の状態
@@ -137,9 +140,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
     // LocalStorageから担当者データを読み込み、なければサンプルデータを使用
     const savedStaff = localStorage.getItem('staffList')
     const initialStaff: Staff[] = savedStaff ? JSON.parse(savedStaff) : [
-      { id: '1', name: '田中さん', menuIds: ['1', '2', '3'] },
-      { id: '2', name: '佐藤さん', menuIds: ['2', '3', '4'] },
-      { id: '3', name: '山田さん', menuIds: ['1', '3', '4'] }
+      { id: '1', name: '田中さん', email: 'tanaka@example.com', menuIds: ['1', '2', '3'] },
+      { id: '2', name: '佐藤さん', email: 'sato@example.com', menuIds: ['2', '3', '4'] },
+      { id: '3', name: '山田さん', email: 'yamada@example.com', menuIds: ['1', '3', '4'] }
     ]
 
     // LocalStorageからメニューデータを読み込み、なければサンプルデータを使用
@@ -358,7 +361,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   // 施術時間分の後続スロットをブロックする関数
   const blockFollowingSlots = (startTime: string, duration: number, date: string, staffId: string) => {
     const startHour = parseInt(startTime.split(':')[0])
-    const slotsToBlock = Math.ceil(duration / 60) // 60分単位でスロット数を計算
+    const slotsToBlock = Math.ceil(duration / 60) - 1 // 開始スロットは除外するので-1
     
     console.log('=== Blocking slots debug ===')
     console.log('Input params:', {
@@ -373,6 +376,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       targetHours: Array.from({length: slotsToBlock}, (_, i) => startHour + i + 1)
     })
     
+    // slotsToBlockが0以下の場合は何もブロックしない（60分以下の施術）
+    if (slotsToBlock <= 0) {
+      console.log('No additional slots to block (duration <= 60 minutes)')
+      return
+    }
+    
     setSchedules(prev => {
       const updatedSchedules = prev.map(schedule => {
         if (schedule.date === date) {
@@ -380,6 +389,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
           
           const updatedSlots = schedule.slots.map(slot => {
             const slotHour = parseInt(slot.time.split(':')[0])
+            // 開始時間の次のスロットから、施術時間分だけブロック
             const isInBlockRange = slotHour > startHour && slotHour <= startHour + slotsToBlock
             
             console.log(`Checking slot ${slot.time}:`, {
@@ -509,6 +519,53 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
     }
   }
 
+  // メール通知機能
+  const sendNotificationEmail = async (reservation: ReservationRecord, staff: Staff) => {
+    try {
+      // EmailJS の設定確認
+      const serviceId = process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID
+      const templateId = process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID
+      const publicKey = process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY
+
+      if (!serviceId || !templateId || !publicKey) {
+        console.warn('⚠️ EmailJS configuration not found. Email notification skipped.')
+        console.warn('環境変数が設定されていないため、メール通知をスキップしました。')
+        return
+      }
+
+      // EmailJS初期化
+      emailjs.init(publicKey)
+
+      // メールテンプレート用のパラメータ
+      const templateParams = {
+        to_email: staff.email,
+        to_name: staff.name,
+        customer_name: reservation.customerInfo.name,
+        customer_phone: reservation.customerInfo.phone,
+        reservation_date: formatDate(reservation.date),
+        reservation_time: reservation.time,
+        menu_name: reservation.customerInfo.menu.name,
+        menu_duration: reservation.customerInfo.menu.duration,
+        menu_price: reservation.customerInfo.menu.price.toLocaleString(),
+        salon_name: 'ネイルサロン'
+      }
+
+      console.log('📧 Sending email notification:', templateParams)
+
+      // メール送信
+      const response = await emailjs.send(
+        serviceId,
+        templateId,
+        templateParams
+      )
+
+      console.log('✅ Email notification sent successfully:', response)
+    } catch (error) {
+      console.error('❌ Failed to send email notification:', error)
+      // エラーが発生してもユーザーには表示しない（予約自体は成功しているため）
+    }
+  }
+
   const handleReservation = () => {
     if (!selectedSlot || !customerName || !selectedMenu || !selectedStaff) return
 
@@ -548,14 +605,15 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       const updated = prev.map(schedule => {
         if (schedule.slots.some(slot => slot.id === selectedSlot.id)) {
           const startHour = parseInt(selectedSlot.time.split(':')[0])
-          const slotsToBlock = Math.ceil(selectedMenu.duration / 60)
+          const slotsToBlock = Math.ceil(selectedMenu.duration / 60) - 1 // 開始スロットは除外するので-1
           
           console.log('Processing schedule for reservation:', {
             date: schedule.date,
             startTime: selectedSlot.time,
             startHour,
             duration: selectedMenu.duration,
-            slotsToBlock
+            slotsToBlock,
+            explanation: `${selectedMenu.duration}分の施術なので、開始スロット(${selectedSlot.time})の後、${slotsToBlock}個のスロットをブロック`
           })
           
           const updatedSlots = schedule.slots.map(slot => {
@@ -567,10 +625,10 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               return { ...slot, isAvailable: false, customerInfo: newReservation.customerInfo }
             }
             
-            // 後続スロットをブロック
-            const isInBlockRange = slotHour > startHour && slotHour <= startHour + slotsToBlock
+            // 後続スロットをブロック（slotsToBlockが0以下の場合はブロックしない）
+            const isInBlockRange = slotsToBlock > 0 && slotHour > startHour && slotHour <= startHour + slotsToBlock
             if (isInBlockRange && slot.isAvailable && !slot.customerInfo) {
-              console.log('🔒 Blocking following slot:', slot.time)
+              console.log('🔒 Blocking following slot:', slot.time, `(${slotHour - startHour}時間目)`)
               return { 
                 ...slot, 
                 isAvailable: false,
@@ -594,8 +652,11 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       return updated
     })
 
+    // 担当者にメール通知を送信
+    sendNotificationEmail(newReservation, selectedStaff)
+
     // 予約完了メッセージ
-    alert(`✅ 予約が完了しました！\n\n📅 ${formatDate(reservationDate)} ${selectedSlot.time}\n👤 ${customerName} 様\n👩‍💼 担当: ${selectedStaff.name}\n💅 ${selectedMenu.name}\n💰 ¥${selectedMenu.price.toLocaleString()}\n\nご来店をお待ちしております♪`)
+    alert(`✅ 予約が完了しました！\n\n📅 ${formatDate(reservationDate)} ${selectedSlot.time}\n👤 ${customerName} 様\n👩‍💼 担当: ${selectedStaff.name}\n💅 ${selectedMenu.name}\n💰 ¥${selectedMenu.price.toLocaleString()}\n\n担当者への通知メールも送信しました。\nご来店をお待ちしております♪`)
 
     // フォームをリセット
     setShowReservationForm(false)
@@ -1267,7 +1328,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             <h3 className="text-2xl font-semibold text-gray-800 mb-4">管理ダッシュボード</h3>
             <p className="text-gray-600 mb-6">上のタブから管理したい項目を選択してください</p>
             
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-6">
               <div className="bg-blue-50 p-4 rounded-lg">
                 <div className="text-2xl text-blue-600 mb-2">📊</div>
                 <div className="font-semibold text-gray-800">予約管理</div>
@@ -1306,6 +1367,55 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                 </div>
                 <div className="text-sm text-gray-600">
                   総要望: {timeRequests.length}件
+                </div>
+              </div>
+              
+              <div className={`p-4 rounded-lg ${
+                process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID && 
+                process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID && 
+                process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY 
+                  ? 'bg-green-50' 
+                  : 'bg-red-50'
+              }`}>
+                <div className={`text-2xl mb-2 ${
+                  process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID && 
+                  process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID && 
+                  process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY 
+                    ? 'text-green-600' 
+                    : 'text-red-600'
+                }`}>📧</div>
+                <div className="font-semibold text-gray-800">メール通知</div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID && 
+                   process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID && 
+                   process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY 
+                    ? '設定済み' 
+                    : '未設定'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID && 
+                   process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID && 
+                   process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY 
+                    ? '予約時に担当者へ自動通知' 
+                    : 'EMAIL_SETUP.mdを参照'}
+                </div>
+              </div>
+
+              {/* スタッフメール設定状況 */}
+              <div className="text-center">
+                <div className={`text-3xl mb-2 ${
+                  staffList.every(staff => staff.email && staff.email.trim()) 
+                    ? 'text-green-600' 
+                    : 'text-yellow-600'
+                }`}>👥</div>
+                <div className="font-semibold text-gray-800">スタッフメール</div>
+                <div className="text-sm text-gray-600 mt-1">
+                  {staffList.filter(staff => staff.email && staff.email.trim()).length} / {staffList.length} 人
+                </div>
+                <div className="text-xs text-gray-500">
+                  {staffList.every(staff => staff.email && staff.email.trim())
+                    ? '全員設定済み'
+                    : 'メール未設定スタッフあり'}
                 </div>
               </div>
             </div>
@@ -1782,7 +1892,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               <button
                 onClick={() => {
                   setEditingStaff(null)
-                  setStaffForm({ name: '' })
+                  setStaffForm({ name: '', email: '' })
                   setShowStaffForm(true)
                 }}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
@@ -1796,13 +1906,17 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
               {staffList.map(staff => (
                 <div key={staff.id} className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-semibold text-gray-800">{staff.name}</h4>
+                    <div>
+                      <h4 className="font-semibold text-gray-800">{staff.name}</h4>
+                      <p className="text-sm text-gray-600">📧 {staff.email || '未設定'}</p>
+                    </div>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => {
                           setEditingStaff(staff)
                           setStaffForm({
-                            name: staff.name
+                            name: staff.name,
+                            email: staff.email
                           })
                           setShowStaffForm(true)
                         }}
@@ -1845,7 +1959,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                             // 編集中の場合はクリア
                             if (editingStaff?.id === staff.id) {
                               setEditingStaff(null)
-                              setStaffForm({ name: '' })
+                              setStaffForm({ name: '', email: '' })
                               setShowStaffForm(false)
                             }
                             
@@ -1881,11 +1995,23 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                       placeholder="スタッフ名を入力"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      メールアドレス
+                    </label>
+                    <input
+                      type="email"
+                      value={staffForm.email}
+                      onChange={(e) => setStaffForm(prev => ({ ...prev, email: e.target.value }))}
+                      className="w-full p-2 border border-gray-300 rounded-lg"
+                      placeholder="メールアドレスを入力（例：staff@example.com）"
+                    />
+                  </div>
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => {
                         setEditingStaff(null)
-                        setStaffForm({ name: '' })
+                        setStaffForm({ name: '', email: '' })
                         setShowStaffForm(false)
                       }}
                       className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -1899,12 +2025,24 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                           alert('スタッフ名を入力してください')
                           return
                         }
+                        
+                        if (!staffForm.email.trim()) {
+                          alert('メールアドレスを入力してください')
+                          return
+                        }
+                        
+                        // メールアドレスの形式チェック
+                        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+                        if (!emailRegex.test(staffForm.email.trim())) {
+                          alert('正しいメールアドレスの形式で入力してください')
+                          return
+                        }
 
                         if (editingStaff) {
                           // 編集の場合
                           const updatedStaff = staffList.map(s => 
                             s.id === editingStaff.id 
-                              ? { ...s, name: staffForm.name.trim() }
+                              ? { ...s, name: staffForm.name.trim(), email: staffForm.email.trim() }
                               : s
                           )
                           setStaffList(updatedStaff)
@@ -1916,6 +2054,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                           const newStaff: Staff = {
                             id: Date.now().toString(),
                             name: staffForm.name.trim(),
+                            email: staffForm.email.trim(),
                             menuIds: []
                           }
                           const updatedStaff = [...staffList, newStaff]
@@ -1927,7 +2066,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
 
                         // フォームをリセット
                         setEditingStaff(null)
-                        setStaffForm({ name: '' })
+                        setStaffForm({ name: '', email: '' })
                         setShowStaffForm(false)
                       }}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
