@@ -31,6 +31,7 @@ interface TimeSlot {
   time: string
   isAvailable: boolean
   customerInfo?: CustomerInfo
+  date?: string  // 選択されたスロットの日付情報
 }
 
 interface DaySchedule {
@@ -140,7 +141,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
     // LocalStorageから担当者データを読み込み、なければサンプルデータを使用
     const savedStaff = localStorage.getItem('staffList')
     const initialStaff: Staff[] = savedStaff ? JSON.parse(savedStaff) : [
-      { id: '1', name: '田中さん', email: 'tanaka@example.com', menuIds: ['1', '2', '3'] },
+      { id: '1', name: '田中さん', email: 'Abe.Ayusa@trans-cosmos.co.jp', menuIds: ['1', '2', '3'] },
       { id: '2', name: '佐藤さん', email: 'sato@example.com', menuIds: ['2', '3', '4'] },
       { id: '3', name: '山田さん', email: 'yamada@example.com', menuIds: ['1', '3', '4'] }
     ]
@@ -210,12 +211,23 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       
       const slots: TimeSlot[] = []
       for (let hour = 10; hour <= 22; hour++) {
-        const timeString = `${hour.toString().padStart(2, '0')}:00`
+        // 00分のスロット
+        const timeString00 = `${hour.toString().padStart(2, '0')}:00`
         slots.push({
-          id: `${dateString}-${timeString}`,
-          time: timeString,
+          id: `${dateString}-${timeString00}`,
+          time: timeString00,
           isAvailable: true // 初期状態は全て空き
         })
+        
+        // 30分のスロット（22時台は22:30まで）
+        if (hour < 22) {
+          const timeString30 = `${hour.toString().padStart(2, '0')}:30`
+          slots.push({
+            id: `${dateString}-${timeString30}`,
+            time: timeString30,
+            isAvailable: true // 初期状態は全て空き
+          })
+        }
       }
       
       newSchedules.push({
@@ -231,8 +243,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
 
   // 予約競合チェック関数
   const canMakeReservation = (startTime: string, duration: number, date: string): boolean => {
-    const startHour = parseInt(startTime.split(':')[0])
-    const slotsNeeded = Math.ceil(duration / 60) // 施術に必要な時間枠数
+    const [startHour, startMinute] = startTime.split(':').map(Number)
+    const startTotalMinutes = startHour * 60 + startMinute
+    const slotsNeeded = Math.ceil(duration / 30) // 施術に必要な時間枠数（30分単位）
     
     // 対象日のスケジュールを取得
     const targetSchedule = schedules.find(schedule => schedule.date === date)
@@ -242,15 +255,22 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       startTime,
       duration,
       date,
-      startHour,
+      startTotalMinutes,
       slotsNeeded,
-      requiredSlots: Array.from({length: slotsNeeded}, (_, i) => startHour + i)
+      requiredSlots: Array.from({length: slotsNeeded}, (_, i) => {
+        const minutes = startTotalMinutes + (i * 30)
+        const hour = Math.floor(minutes / 60)
+        const minute = minutes % 60
+        return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      })
     })
     
     // 必要な全ての時間枠をチェック
     for (let i = 0; i < slotsNeeded; i++) {
-      const checkHour = startHour + i
-      const checkTime = `${checkHour.toString().padStart(2, '0')}:00`
+      const checkTotalMinutes = startTotalMinutes + (i * 30)
+      const checkHour = Math.floor(checkTotalMinutes / 60)
+      const checkMinute = checkTotalMinutes % 60
+      const checkTime = `${checkHour.toString().padStart(2, '0')}:${checkMinute.toString().padStart(2, '0')}`
       
       const slot = targetSchedule.slots.find(s => s.time === checkTime)
       
@@ -282,7 +302,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
     const commonDurations = [60, 90, 120]
     
     commonDurations.forEach(duration => {
-      const slotsNeeded = Math.ceil(duration / 60)
+      const slotsNeeded = Math.ceil(duration / 30)
       const targetHour = parseInt(targetTime.split(':')[0])
       
       // このスロットを含む可能性のある予約開始時間をチェック
@@ -318,7 +338,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       menuDuration: selectedMenu?.duration
     })
     
-    setSelectedSlot({ ...slot, id: slot.id })
+    setSelectedSlot({ ...slot, id: slot.id, date: date })
     setShowReservationForm(true)
   }
 
@@ -360,8 +380,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
 
   // 施術時間分の後続スロットをブロックする関数
   const blockFollowingSlots = (startTime: string, duration: number, date: string, staffId: string) => {
-    const startHour = parseInt(startTime.split(':')[0])
-    const slotsToBlock = Math.ceil(duration / 60) - 1 // 開始スロットは除外するので-1
+    const [startHour, startMinute] = startTime.split(':').map(Number)
+    const startTotalMinutes = startHour * 60 + startMinute
+    const slotsToBlock = Math.ceil(duration / 30) - 1 // 開始スロットは除外するので-1（30分単位）
     
     console.log('=== Blocking slots debug ===')
     console.log('Input params:', {
@@ -371,14 +392,19 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       staffId
     })
     console.log('Calculated values:', {
-      startHour,
+      startTotalMinutes,
       slotsToBlock,
-      targetHours: Array.from({length: slotsToBlock}, (_, i) => startHour + i + 1)
+      targetSlots: Array.from({length: slotsToBlock}, (_, i) => {
+        const minutes = startTotalMinutes + ((i + 1) * 30)
+        const hour = Math.floor(minutes / 60)
+        const minute = minutes % 60
+        return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      })
     })
     
-    // slotsToBlockが0以下の場合は何もブロックしない（60分以下の施術）
+    // slotsToBlockが0以下の場合は何もブロックしない（30分以下の施術）
     if (slotsToBlock <= 0) {
-      console.log('No additional slots to block (duration <= 60 minutes)')
+      console.log('No additional slots to block (duration <= 30 minutes)')
       return
     }
     
@@ -388,14 +414,16 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
           console.log('Processing schedule for date:', date)
           
           const updatedSlots = schedule.slots.map(slot => {
-            const slotHour = parseInt(slot.time.split(':')[0])
+            const [slotHour, slotMinute] = slot.time.split(':').map(Number)
+            const slotTotalMinutes = slotHour * 60 + slotMinute
             // 開始時間の次のスロットから、施術時間分だけブロック
-            const isInBlockRange = slotHour > startHour && slotHour <= startHour + slotsToBlock
+            const isInBlockRange = slotTotalMinutes > startTotalMinutes && 
+                                  slotTotalMinutes <= startTotalMinutes + (slotsToBlock * 30)
             
             console.log(`Checking slot ${slot.time}:`, {
-              slotHour,
+              slotTotalMinutes,
               isInBlockRange,
-              condition: `${slotHour} > ${startHour} && ${slotHour} <= ${startHour + slotsToBlock}`,
+              condition: `${slotTotalMinutes} > ${startTotalMinutes} && ${slotTotalMinutes} <= ${startTotalMinutes + (slotsToBlock * 30)}`,
               isAvailable: slot.isAvailable,
               hasCustomerInfo: !!slot.customerInfo
             })
@@ -453,12 +481,23 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
           
           const slots: TimeSlot[] = []
           for (let hour = 10; hour <= 22; hour++) {
-            const timeString = `${hour.toString().padStart(2, '0')}:00`
+            // 00分のスロット
+            const timeString00 = `${hour.toString().padStart(2, '0')}:00`
             slots.push({
-              id: `${dateString}-${timeString}`,
-              time: timeString,
+              id: `${dateString}-${timeString00}`,
+              time: timeString00,
               isAvailable: true // 全て空き状態に
             })
+            
+            // 30分のスロット（22時台は22:30まで）
+            if (hour < 22) {
+              const timeString30 = `${hour.toString().padStart(2, '0')}:30`
+              slots.push({
+                id: `${dateString}-${timeString30}`,
+                time: timeString30,
+                isAvailable: true // 全て空き状態に
+              })
+            }
           }
           
           newSchedules.push({
@@ -496,12 +535,23 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
         
         const slots: TimeSlot[] = []
         for (let hour = 10; hour <= 22; hour++) {
-          const timeString = `${hour.toString().padStart(2, '0')}:00`
+          // 00分のスロット
+          const timeString00 = `${hour.toString().padStart(2, '0')}:00`
           slots.push({
-            id: `${dateString}-${timeString}`,
-            time: timeString,
+            id: `${dateString}-${timeString00}`,
+            time: timeString00,
             isAvailable: true
           })
+          
+          // 30分のスロット（22時台は22:30まで）
+          if (hour < 22) {
+            const timeString30 = `${hour.toString().padStart(2, '0')}:30`
+            slots.push({
+              id: `${dateString}-${timeString30}`,
+              time: timeString30,
+              isAvailable: true
+            })
+          }
         }
         
         newSchedules.push({
@@ -522,18 +572,35 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
   // メール通知機能
   const sendNotificationEmail = async (reservation: ReservationRecord, staff: Staff) => {
     try {
+      console.log('🔥 [EMAIL DEBUG] Starting email notification process')
+      console.log('🔥 [EMAIL DEBUG] Staff info:', {
+        name: staff.name,
+        email: staff.email
+      })
+      
       // EmailJS の設定確認
       const serviceId = process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID
       const templateId = process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID
       const publicKey = process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY
 
+      console.log('🔥 [EMAIL DEBUG] Environment variables:', {
+        serviceId: serviceId ? 'SET' : 'NOT SET',
+        templateId: templateId ? 'SET' : 'NOT SET', 
+        publicKey: publicKey ? 'SET' : 'NOT SET',
+        serviceIdValue: serviceId,
+        templateIdValue: templateId,
+        publicKeyValue: publicKey ? `${publicKey.substring(0, 10)}...` : 'undefined'
+      })
+
       if (!serviceId || !templateId || !publicKey) {
-        console.warn('⚠️ EmailJS configuration not found. Email notification skipped.')
-        console.warn('環境変数が設定されていないため、メール通知をスキップしました。')
+        console.error('❌ [EMAIL DEBUG] EmailJS configuration missing!')
+        console.error('❌ [EMAIL DEBUG] 環境変数が設定されていないため、メール通知をスキップしました。')
+        alert('❌ メール設定エラー\n\n環境変数が設定されていません。\n\n以下を.env.localファイルで設定してください：\n- NEXT_PUBLIC_EMAILJS_SERVICE_ID\n- NEXT_PUBLIC_EMAILJS_TEMPLATE_ID\n- NEXT_PUBLIC_EMAILJS_PUBLIC_KEY')
         return
       }
 
       // EmailJS初期化
+      console.log('🔥 [EMAIL DEBUG] Initializing EmailJS with public key')
       emailjs.init(publicKey)
 
       // メールテンプレート用のパラメータ
@@ -550,7 +617,9 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
         salon_name: 'ネイルサロン'
       }
 
-      console.log('📧 Sending email notification:', templateParams)
+      console.log('� [EMAIL DEBUG] Email template parameters:', templateParams)
+
+      console.log('🔥 [EMAIL DEBUG] Attempting to send email...')
 
       // メール送信
       const response = await emailjs.send(
@@ -559,19 +628,120 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
         templateParams
       )
 
-      console.log('✅ Email notification sent successfully:', response)
+      console.log('✅ [EMAIL DEBUG] Email sent successfully!')
+      console.log('✅ [EMAIL DEBUG] Response:', response)
+      console.log('✅ [EMAIL DEBUG] Email sent to:', staff.email)
+      alert(`✅ メール送信完了!\n\n送信先: ${staff.email}\nステータス: ${response.status}\nメッセージ: ${response.text}`)
     } catch (error) {
-      console.error('❌ Failed to send email notification:', error)
-      // エラーが発生してもユーザーには表示しない（予約自体は成功しているため）
+      console.error('❌ [EMAIL DEBUG] Failed to send email notification!')
+      console.error('❌ [EMAIL DEBUG] Error details:', error)
+      console.error('❌ [EMAIL DEBUG] Error type:', typeof error)
+      console.error('❌ [EMAIL DEBUG] Error message:', error instanceof Error ? error.message : 'Unknown error')
+      
+      // エラー詳細をユーザーに表示
+      alert(`❌ メール送信エラー\n\n送信先: ${staff.email}\nエラー: ${error instanceof Error ? error.message : 'Unknown error'}\n\n予約は正常に完了していますが、メール通知に失敗しました。`)
+    }
+  }
+
+  // テスト用メール送信機能
+  const testEmailSend = async () => {
+    try {
+      console.log('🧪 [TEST] =================')
+      console.log('🧪 [TEST] Starting email test diagnosis...')
+      
+      // 1. スタッフチェック
+      if (staffList.length === 0) {
+        alert('❌ スタッフが登録されていません')
+        return
+      }
+
+      const testStaff = staffList[0] // 最初のスタッフでテスト
+      console.log('🧪 [TEST] Selected staff:', testStaff)
+
+      // 2. 環境変数チェック
+      const serviceId = process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID
+      const templateId = process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID
+      const publicKey = process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY
+
+      console.log('🧪 [TEST] Environment check:', {
+        serviceId: serviceId || 'NOT FOUND',
+        templateId: templateId || 'NOT FOUND',
+        publicKey: publicKey ? `${publicKey.substring(0, 5)}...` : 'NOT FOUND',
+        hasAll: !!(serviceId && templateId && publicKey)
+      })
+
+      if (!serviceId || !templateId || !publicKey) {
+        alert(`❌ 環境変数エラー\n\nService ID: ${serviceId ? '✅' : '❌'}\nTemplate ID: ${templateId ? '✅' : '❌'}\nPublic Key: ${publicKey ? '✅' : '❌'}`)
+        return
+      }
+
+      // 3. EmailJSライブラリチェック
+      console.log('🧪 [TEST] EmailJS library check:', {
+        emailjsExists: typeof emailjs !== 'undefined',
+        emailjsType: typeof emailjs,
+        emailjsSend: typeof emailjs?.send
+      })
+
+      if (typeof emailjs === 'undefined') {
+        alert('❌ EmailJSライブラリが読み込まれていません')
+        return
+      }
+
+      // 4. テスト予約データ作成
+      const testReservation: ReservationRecord = {
+        id: 'test-' + Date.now(),
+        date: new Date().toISOString().split('T')[0],
+        time: '14:00',
+        customerInfo: {
+          name: 'テスト太郎',
+          phone: '090-1234-5678',
+          menu: {
+            id: '1',
+            name: 'テストメニュー',
+            duration: 60,
+            price: 5000,
+            staffId: testStaff.id
+          },
+          staff: testStaff
+        },
+        completed: false
+      }
+
+      console.log('🧪 [TEST] Test reservation created:', testReservation)
+      console.log('🧪 [TEST] Starting actual email send...')
+
+      // 5. 実際のメール送信
+      await sendNotificationEmail(testReservation, testStaff)
+      
+    } catch (error) {
+      console.error('🧪 [TEST] Test function error:', error)
+      alert(`❌ テスト関数エラー\n\n${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
   const handleReservation = () => {
     if (!selectedSlot || !customerName || !selectedMenu || !selectedStaff) return
 
-    // 選択されたスロットIDから日付を抽出 (例: "2025-08-05-14:00" -> "2025-08-05")
-    const parts = selectedSlot.id.split('-')
-    const reservationDate = `${parts[0]}-${parts[1]}-${parts[2]}`
+    // より安全な日付取得方法：dateプロパティがあればそれを使用、なければIDから抽出
+    let reservationDate: string
+    
+    if (selectedSlot.date) {
+      reservationDate = selectedSlot.date
+    } else {
+      // 旧形式対応：スロットIDから日付を抽出 (例: "2025-08-05-14:00" または "2025-08-05-14:30")
+      console.log('🔍 Debug slot info (fallback):', {
+        selectedSlotId: selectedSlot.id,
+        selectedSlotTime: selectedSlot.time
+      })
+      
+      const parts = selectedSlot.id.split('-')
+      reservationDate = `${parts[0]}-${parts[1]}-${parts[2]}`
+      
+      console.log('🔍 Debug date extraction (fallback):', {
+        parts,
+        reservationDate
+      })
+    }
     
     console.log('🎯 Starting reservation process:', {
       time: selectedSlot.time,
@@ -604,20 +774,22 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
       
       const updated = prev.map(schedule => {
         if (schedule.slots.some(slot => slot.id === selectedSlot.id)) {
-          const startHour = parseInt(selectedSlot.time.split(':')[0])
-          const slotsToBlock = Math.ceil(selectedMenu.duration / 60) - 1 // 開始スロットは除外するので-1
+          const [startHour, startMinute] = selectedSlot.time.split(':').map(Number)
+          const startTotalMinutes = startHour * 60 + startMinute
+          const slotsToBlock = Math.ceil(selectedMenu.duration / 30) - 1 // 開始スロットは除外するので-1（30分単位）
           
           console.log('Processing schedule for reservation:', {
             date: schedule.date,
             startTime: selectedSlot.time,
-            startHour,
+            startTotalMinutes,
             duration: selectedMenu.duration,
             slotsToBlock,
             explanation: `${selectedMenu.duration}分の施術なので、開始スロット(${selectedSlot.time})の後、${slotsToBlock}個のスロットをブロック`
           })
           
           const updatedSlots = schedule.slots.map(slot => {
-            const slotHour = parseInt(slot.time.split(':')[0])
+            const [slotHour, slotMinute] = slot.time.split(':').map(Number)
+            const slotTotalMinutes = slotHour * 60 + slotMinute
             
             // 予約スロット自体を埋める
             if (slot.id === selectedSlot.id) {
@@ -626,9 +798,12 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
             }
             
             // 後続スロットをブロック（slotsToBlockが0以下の場合はブロックしない）
-            const isInBlockRange = slotsToBlock > 0 && slotHour > startHour && slotHour <= startHour + slotsToBlock
+            const isInBlockRange = slotsToBlock > 0 && 
+                                  slotTotalMinutes > startTotalMinutes && 
+                                  slotTotalMinutes <= startTotalMinutes + (slotsToBlock * 30)
             if (isInBlockRange && slot.isAvailable && !slot.customerInfo) {
-              console.log('🔒 Blocking following slot:', slot.time, `(${slotHour - startHour}時間目)`)
+              const blockNumber = Math.floor((slotTotalMinutes - startTotalMinutes) / 30)
+              console.log('🔒 Blocking following slot:', slot.time, `(${blockNumber}番目の30分スロット)`)
               return { 
                 ...slot, 
                 isAvailable: false,
@@ -898,7 +1073,7 @@ export default function ReservationSystem({ isAdminMode }: ReservationSystemProp
                     <h4 className="font-semibold text-center mb-3 text-gray-800">
                       {formatDate(schedule.date)}
                     </h4>
-                    <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {schedule.slots.map(slot => {
                         // 選択されたメニューの時間を考慮した予約可能性チェック
                         const canBook = selectedMenu ? 
